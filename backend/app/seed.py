@@ -130,7 +130,7 @@ def seed_all() -> dict:
     # --- SCENARIO 3: OLX scam ---
     state["scenarios"]["olx"] = _seed_olx(state)
 
-    with _DEMO_FILE.open("w") as f:
+    with _DEMO_FILE.open("w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
 
     return state
@@ -459,7 +459,7 @@ def load_demo_state() -> dict | None:
     """Zwraca już zseedowany state, jeśli istnieje."""
     if _DEMO_FILE.exists():
         try:
-            return json.loads(_DEMO_FILE.read_text())
+            return json.loads(_DEMO_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return None
     return None

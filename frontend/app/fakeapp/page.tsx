@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, MoreVertical, Phone, Video, Search } from "lucide-react";
+import { ArrowLeft, MoreVertical, Phone, Video, Search, Send } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, type DemoChat, type DemoMessage, type VerificationResult } from "@/lib/api";
 import { cn, formatTime } from "@/lib/utils";
+import { useKeystrokeCapture, type BehaviorScore } from "@/lib/useKeystrokeCapture";
 import { CrIcon } from "@/components/nutrition/CrIcon";
 import { NutritionSheet } from "@/components/nutrition/NutritionSheet";
 
@@ -159,6 +160,22 @@ function ChatView({
   onBack: () => void;
   onShowSheet: (r: VerificationResult) => void;
 }) {
+  const { onKeyDown, onKeyUp, score, reset, getEvents } = useKeystrokeCapture();
+  const [text, setText] = useState("");
+
+  const handleSend = async () => {
+    if (!text.trim()) return;
+    const keystrokes = getEvents();
+    reset();
+    setText("");
+    try {
+      const result = await api.verifyText(text, keystrokes);
+      onShowSheet(result);
+    } catch {
+      // demo — ignoruj błąd sieci
+    }
+  };
+
   return (
     <>
       {/* Chat header */}
@@ -201,20 +218,97 @@ function ChatView({
         </AnimatePresence>
       </div>
 
-      {/* Composer (disabled, demo) */}
-      <div className="border-t border-ink-600/40 px-4 md:px-6 py-3">
-        <div className="flex items-center gap-3 bg-ink-700/40 rounded-full px-4 py-2.5">
-          <input
-            placeholder="Wiadomość zostanie podpisana Twoim urządzeniem..."
-            className="flex-1 bg-transparent outline-none text-sm text-ink-100 placeholder:text-ink-400"
-          />
-          <span className="cr-icon text-amber-glow/70 border-amber-glow/40 text-[0.5rem] w-5 h-5">CR</span>
+      {/* Composer */}
+      <div className="border-t border-ink-600/40 px-4 md:px-6 py-3 space-y-2">
+        <BehaviorBar score={score} />
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-3 bg-ink-700/40 rounded-full px-4 py-2.5 border border-ink-600/40 focus-within:border-amber-glow/40 transition-colors">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                onKeyDown();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              onKeyUp={onKeyUp}
+              placeholder="Napisz wiadomość — TrustLayer mierzy rytm pisania..."
+              className="flex-1 bg-transparent outline-none text-sm text-ink-100 placeholder:text-ink-400"
+            />
+            <span className="cr-icon text-amber-glow/70 border-amber-glow/40 text-[0.5rem] w-5 h-5 flex-shrink-0">CR</span>
+          </div>
+          <button
+            onClick={handleSend}
+            disabled={!text.trim()}
+            className="w-10 h-10 rounded-full flex items-center justify-center bg-amber-glow/20 border border-amber-glow/40 text-amber-glow disabled:opacity-30 disabled:cursor-not-allowed hover:bg-amber-glow/30 transition-colors flex-shrink-0"
+          >
+            <Send size={15} />
+          </button>
         </div>
-        <div className="text-[10px] text-ink-400 mt-1.5 text-center font-mono">
+        <div className="text-[10px] text-ink-400 text-center font-mono">
           Każda wysłana wiadomość jest podpisywana lokalnie kluczem z Twojego urządzenia
         </div>
       </div>
     </>
+  );
+}
+
+// ---------- BehaviorBar ----------
+
+function BehaviorBar({ score }: { score: BehaviorScore }) {
+  const { keystrokeCount, confidence, looksHuman } = score;
+  const pct = Math.round(confidence * 100);
+
+  if (keystrokeCount < 3) {
+    return (
+      <div className="flex items-center gap-2 px-1">
+        <span className="text-[10px] font-mono text-ink-500 w-28 flex-shrink-0">Behawior: czekam…</span>
+        <div className="flex-1 h-1 rounded-full bg-ink-700/60" />
+      </div>
+    );
+  }
+
+  const color = looksHuman
+    ? "bg-verified"
+    : confidence > 0.35
+    ? "bg-amber-glow"
+    : "bg-clash";
+
+  const label = looksHuman
+    ? `CZŁOWIEK ${pct}%`
+    : confidence > 0.35
+    ? `NIEPEWNE ${pct}%`
+    : `BOT ${pct}%`;
+
+  const textColor = looksHuman
+    ? "text-verified"
+    : confidence > 0.35
+    ? "text-amber-glow"
+    : "text-clash";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-center gap-2 px-1"
+    >
+      <span className={cn("text-[10px] font-mono w-28 flex-shrink-0 font-medium", textColor)}>
+        {label}
+      </span>
+      <div className="flex-1 h-1 rounded-full bg-ink-700/60 overflow-hidden">
+        <motion.div
+          className={cn("h-full rounded-full", color)}
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ type: "spring", damping: 20, stiffness: 200 }}
+        />
+      </div>
+      <span className="text-[10px] font-mono text-ink-500 w-12 text-right">
+        {keystrokeCount}k
+      </span>
+    </motion.div>
   );
 }
 
