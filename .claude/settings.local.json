@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(start \"c:/Users/kazwe/OneDrive/Pulpit/IT/GitHub/Hacknarok-Software/index.html\")"
+    ]
+  }
+}

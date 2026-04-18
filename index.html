@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dodatkowy Challenge - dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      font-size: 13px;
+    }
+
+    .topbar {
+      height: 48px;
+      background: #1a1a2e;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 32px;
+      flex-shrink: 0;
+      z-index: 1000;
+    }
+    .logo {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+    .logo em { font-style: normal; color: #e05a2b; }
+    .topbar-divider { width: 1px; height: 24px; background: #2e2e4a; flex-shrink: 0; }
+    .topbar-kpis { display: flex; gap: 28px; }
+    .kpi { display: flex; align-items: baseline; gap: 6px; }
+    .kpi-val { font-size: 16px; font-weight: 700; }
+    .kpi-lbl { font-size: 11px; color: #8888aa; }
+    .kpi-val.red    { color: #e05a2b; }
+    .kpi-val.yellow { color: #d4a017; }
+    .kpi-val.green  { color: #3a9e6a; }
+    .topbar-right { margin-left: auto; font-size: 11px; color: #8888aa; }
+
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    .map-wrap {
+      position: relative;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #map { width: 100%; height: 100%; }
+    .leaflet-container { background: #e8eaef !important; }
+
+    /* ── LEGEND ── */
+    .legend {
+      position: absolute;
+      bottom: 20px;
+      left: 16px;
+      z-index: 500;
+      background: #fff;
+      border: 1px solid #d0d4dc;
+      border-radius: 4px;
+      padding: 10px 14px;
+      font-size: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    }
+    .legend-title { font-weight: 600; margin-bottom: 8px; color: #444; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; color: #555; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── MARKERS ── */
+    .pin {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      cursor: pointer;
+    }
+    .pin-critical { background: #e05a2b; }
+    .pin-warning  { background: #d4a017; }
+    .pin-ok       { background: #3a9e6a; }
+
+    /* ── POPUP ── */
+    .leaflet-popup-content-wrapper {
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      padding: 0;
+      border: 1px solid #d0d4dc;
+    }
+    .leaflet-popup-content { margin: 12px 14px; min-width: 180px; }
+    .leaflet-popup-tip-container { display: none; }
+    .pu-name { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+    .pu-loc  { color: #888; font-size: 11px; margin-bottom: 10px; }
+    .pu-ages { display: flex; gap: 16px; margin-bottom: 10px; border-top: 1px solid #eee; padding-top: 10px; }
+    .pu-age  { flex: 1; }
+    .pu-age .v { font-size: 22px; font-weight: 700; line-height: 1; }
+    .pu-age .l { font-size: 10px; color: #999; margin-top: 2px; }
+    .pu-age.cal .v { color: #555; }
+    .pu-age.cli .v { color: #e05a2b; }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      width: 360px;
+      background: #fff;
+      border-left: 1px solid #d0d4dc;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+
+    /* default state */
+    .sb-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+    }
+    .sb-empty-msg {
+      color: #aaa;
+      font-size: 13px;
+      text-align: center;
+      margin-top: 60px;
+      line-height: 1.7;
+    }
+
+    /* device panel */
+    .sb-panel { display: none; flex-direction: column; }
+
+    /* header */
+    .sb-header {
+      padding: 16px;
+      border-bottom: 1px solid #e8eaef;
+      background: #fff;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .sb-header-top {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 8px;
+      margin-bottom: 4px;
+    }
+    .sb-name { font-size: 14px; font-weight: 700; }
+    .sb-loc  { font-size: 11px; color: #888; }
+    .sb-type { font-size: 11px; color: #aaa; margin-top: 2px; }
+    .status-tag {
+      padding: 2px 8px; border-radius: 3px;
+      font-size: 11px; font-weight: 600;
+      flex-shrink: 0; align-self: flex-start;
+      text-transform: uppercase; letter-spacing: 0.4px;
+    }
+    .tag-critical { background: #fde8e2; color: #c0392b; }
+    .tag-warning  { background: #fdf3d7; color: #9a6f00; }
+    .tag-ok       { background: #e2f4ec; color: #1e7a48; }
+
+    /* age block */
+    .age-row {
+      display: grid; grid-template-columns: 1fr 1fr;
+      border-bottom: 1px solid #e8eaef;
+    }
+    .age-cell {
+      padding: 14px 16px;
+      border-right: 1px solid #e8eaef;
+    }
+    .age-cell:last-child { border-right: none; }
+    .age-label { font-size: 11px; color: #999; margin-bottom: 4px; }
+    .age-val   { font-size: 32px; font-weight: 800; line-height: 1; }
+    .age-unit  { font-size: 13px; color: #999; }
+    .age-sub   { font-size: 11px; color: #aaa; margin-top: 3px; }
+    .age-cal { color: #333; }
+    .age-cli { color: #e05a2b; }
+
+    .accel-row {
+      padding: 10px 16px;
+      background: #fdf3f0;
+      border-bottom: 1px solid #e8eaef;
+      font-size: 12px;
+      color: #555;
+    }
+    .accel-row strong { color: #c0392b; }
+
+    /* section */
+    .sb-section { padding: 14px 16px; border-bottom: 1px solid #e8eaef; }
+    .sb-section-title {
+      font-size: 11px; font-weight: 600;
+      color: #888; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 10px;
+    }
+
+    /* events table */
+    .ev-table { width: 100%; border-collapse: collapse; }
+    .ev-table td { padding: 5px 4px; font-size: 12px; vertical-align: middle; }
+    .ev-table tr + tr td { border-top: 1px solid #f0f0f0; }
+    .ev-type { width: 24px; text-align: center; }
+    .ev-type-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .ev-name { color: #333; }
+    .ev-date { color: #aaa; font-size: 11px; }
+    .ev-aging { text-align: right; font-weight: 600; white-space: nowrap; }
+    .col-heat  { color: #c0392b; }
+    .col-flood { color: #2471a3; }
+    .col-ice   { color: #1a8a9a; }
+    .col-storm { color: #6c3483; }
+    .dot-heat  { background: #c0392b; }
+    .dot-flood { background: #2471a3; }
+    .dot-ice   { background: #1a8a9a; }
+    .dot-storm { background: #6c3483; }
+
+    /* chart */
+    .chart-wrap { height: 150px; position: relative; }
+
+    /* assessment */
+    .assessment {
+      border-radius: 3px; padding: 12px;
+      border-left: 3px solid;
+    }
+    .as-critical { border-color: #c0392b; background: #fdf2f0; }
+    .as-warning  { border-color: #d4a017; background: #fdf9ed; }
+    .as-ok       { border-color: #27ae60; background: #f0faf4; }
+    .as-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    .as-critical .as-title { color: #c0392b; }
+    .as-warning  .as-title { color: #9a6f00; }
+    .as-ok       .as-title { color: #1e7a48; }
+    .as-desc { font-size: 12px; color: #555; line-height: 1.55; }
+  </style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="logo">Climate<em>Age</em></div>
+  <div class="topbar-divider"></div>
+  <div class="topbar-kpis">
+    <div class="kpi"><span class="kpi-val red">5</span><span class="kpi-lbl">Krytyczne</span></div>
+    <div class="kpi"><span class="kpi-val yellow">4</span><span class="kpi-lbl">Monitoring</span></div>
+    <div class="kpi"><span class="kpi-val green">4</span><span class="kpi-lbl">Dobre</span></div>
+    <div class="kpi"><span class="kpi-val" style="color:#e05a2b">+8,3 lat</span><span class="kpi-lbl">Średnia nadwyżka klimatyczna</span></div>
+  </div>
+  <div class="topbar-right">Polska · 13 obiektow</div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div class="legend">
+      <div class="legend-title">Status obiektu</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#e05a2b"></div>Krytyczny: wymień natychmiast</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#d4a017"></div>Monitoruj: średnia ważność</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#3a9e6a"></div>All good: zgodnie z harmonogramem</div>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div class="sidebar" id="sidebar">
+
+    <!-- EMPTY STATE -->
+    <div class="sb-empty" id="sb-empty">
+      <div class="sb-empty-msg">Wybierz obiekt na mapie,<br>aby zobaczyć jego analizę klimatyczną.</div>
+    </div>
+
+    <!-- DEVICE PANEL -->
+    <div class="sb-panel" id="sb-panel">
+
+      <div class="sb-header">
+        <div class="sb-header-top">
+          <div>
+            <div class="sb-name" id="p-name"></div>
+            <div class="sb-loc"  id="p-location"></div>
+          </div>
+          <div class="status-tag" id="p-tag"></div>
+        </div>
+      </div>
+
+      <!-- AGES -->
+      <div class="age-row">
+        <div class="age-cell">
+          <div class="age-label">Wiek harmonogram</div>
+          <div><span class="age-val age-cal" id="p-cal"></span> <span class="age-unit">lat</span></div>
+          <div class="age-sub" id="p-install"></div>
+        </div>
+        <div class="age-cell">
+          <div class="age-label">Wiek według czynników klimatycznych</div>
+          <div><span class="age-val age-cli" id="p-cli"></span> <span class="age-unit">lat</span></div>
+          <div class="age-sub" id="p-design"></div>
+        </div>
+      </div>
+      <div class="accel-row" id="p-accel"></div>
+
+      <!-- EVENTS -->
+      <div class="sb-section">
+        <div class="sb-section-title">Zdarzenia ekstremalne</div>
+        <table class="ev-table" id="p-events"></table>
+      </div>
+
+      <!-- CHART -->
+      <div class="sb-section">
+        <div class="sb-section-title">Prognoza ryzyka awarii</div>
+        <div class="chart-wrap">
+          <canvas id="forecast-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- ASSESSMENT -->
+      <div class="sb-section" style="border-bottom:none;">
+        <div class="sb-section-title">Ocena</div>
+        <div class="assessment" id="p-assessment">
+          <div class="as-title" id="p-as-title"></div>
+          <div class="as-desc"  id="p-as-desc"></div>
+        </div>
+      </div>
+      <div style="height:16px"></div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const devices = [
+  {
+    id: 1,
+    name: "obiekt 1",
+    location: "Warsaw",
+    lat: 52.31, lng: 20.97,
+    type: "110/15 kV Power Transformer",
+    installYear: 1998, designLife: 40,
+    calAge: 27, climateAge: 44,
+    status: "critical",
+    events: [
+      { type: "heat",  name: "Heat Wave",        date: "Jul 2019", aging: 3.2 },
+      { type: "flood", name: "River Flooding",   date: "Jun 2020", aging: 4.1 },
+      { type: "heat",  name: "Heat Wave",        date: "Aug 2022", aging: 3.8 },
+      { type: "storm", name: "Derecho",          date: "Jul 2021", aging: 1.4 },
+      { type: "ice",   name: "Ice Storm",        date: "Feb 2021", aging: 2.1 },
+      { type: "heat",  name: "Record Heat",      date: "Jul 2023", aging: 2.4 },
+    ],
+    riskNow: "78%", risk5yr: "96%", remaining: 3,
+    forecast: [12, 18, 28, 40, 58, 72, 88, 96],
+    rec: { level: "critical", title: "Wymiana natychmiastowa",
+      desc: "Wiek klimatyczny przekracza żywotność projektową o 4 lata - wymiana wymagana" }
+  },
+  {
+    id: 2,
+    name: "obiekt 2",
+    location: "Gdańsk",
+    lat: 54.36, lng: 18.64,
+    type: "220/110 kV Main Substation",
+    installYear: 2001, designLife: 40,
+    calAge: 24, climateAge: 35,
+    status: "warning",
+    events: [
+      { type: "flood", name: "Baltic Coastal Surge", date: "Nov 2021", aging: 3.5 },
+      { type: "storm", name: "Storm Eunice",         date: "Feb 2022", aging: 1.8 },
+      { type: "ice",   name: "Severe Icing",         date: "Jan 2023", aging: 2.2 },
+      { type: "flood", name: "Port Flood",           date: "Oct 2019", aging: 2.7 },
+    ],
+    riskNow: "42%", risk5yr: "71%", remaining: 12,
+    forecast: [5, 10, 18, 28, 42, 55, 68, 78],
+    rec: { level: "warning", title: "Wzmożony monitoring",
+      desc: "Wiek klimatyczny wyprzedza kalendarzowy o 11 lat - inspekcja w ciągu 6 miesięcy" }
+  },
+  {
+    id: 3,
+    name: "obiekt 1",
+    location: "Kraków",
+    lat: 49.99, lng: 19.97,
+    type: "110/15 kV Power Transformer",
+    installYear: 2001, designLife: 35,
+    calAge: 24, climateAge: 41,
+    status: "critical",
+    events: [
+      { type: "heat",  name: "Record Heat",            date: "Jul 2019", aging: 3.6 },
+      { type: "flood", name: "Vistula Flooding",        date: "May 2021", aging: 4.2 },
+      { type: "heat",  name: "Heat Wave",              date: "Aug 2022", aging: 3.1 },
+      { type: "ice",   name: "Lesser Poland Ice Storm", date: "Jan 2021", aging: 2.5 },
+      { type: "storm", name: "Severe Hail",            date: "Jun 2023", aging: 2.0 },
+      { type: "heat",  name: "Record Heat",            date: "Aug 2024", aging: 1.9 },
+    ],
+    riskNow: "82%", risk5yr: "97%", remaining: 2,
+    forecast: [14, 24, 38, 54, 68, 80, 91, 97],
+    rec: { level: "critical", title: "Wymiana natychmiastowa",
+      desc: "Wiek klimatyczny przekracza żywotność o 6 lat. Sześć zdarzeń ekstremalnych dodało łącznie 17 lat zużycia. Wymiana planowana na 2037, powinna nastąpić teraz." }
+  },
+  {
+    id: 4,
+    name: "obiekt 4",
+    location: "Wrocław",
+    lat: 51.11, lng: 16.98,
+    type: "400 kV Transmission Line",
+    installYear: 1993, designLife: 40,
+    calAge: 32, climateAge: 50,
+    status: "critical",
+    events: [
+      { type: "ice",   name: "Ice Accretion",    date: "Jan 2018", aging: 3.1 },
+      { type: "storm", name: "Storm Xavier",     date: "Oct 2018", aging: 1.6 },
+      { type: "flood", name: "Odra River Flood", date: "Sep 2020", aging: 2.9 },
+      { type: "heat",  name: "Heat Wave",        date: "Jul 2019", aging: 2.3 },
+      { type: "ice",   name: "Freezing Rain",    date: "Feb 2021", aging: 3.4 },
+      { type: "storm", name: "Storm Zeynep",     date: "Feb 2022", aging: 2.2 },
+    ],
+    riskNow: "85%", risk5yr: "98%", remaining: 1,
+    forecast: [20, 32, 48, 62, 76, 85, 93, 98],
+    rec: { level: "critical", title: "Ryzyko awarii",
+      desc: "Wiek klimatyczny przekracza żywotność o 10 lat. Prawdopodobieństwo awarii 85%. Wymagana natychmiastowa inspekcja i redystrybucja obciążenia." }
+  },
+  {
+    id: 5,
+    name: "Transformer PO-03",
+    location: "Poznań Central Hub",
+    lat: 52.41, lng: 16.93,
+    type: "110/15 kV Power Transformer",
+    installYear: 2010, designLife: 40,
+    calAge: 15, climateAge: 19,
+    status: "ok",
+    events: [
+      { type: "heat",  name: "Heat Wave",   date: "Aug 2022", aging: 1.8 },
+      { type: "storm", name: "Local Storm", date: "May 2023", aging: 0.9 },
+    ],
+    riskNow: "8%", risk5yr: "18%", remaining: 24,
+    forecast: [2, 4, 6, 10, 15, 20, 27, 35],
+    rec: { level: "ok", title: "Stan dobry",
+      desc: "Wiek klimatyczny wyprzedza kalendarzowy o 4 lata, mieści się w normie. Kontynuować standardowy cykl przeglądów." }
+  },
+];
+
+// ── MAP ──
+let forecastChart = null;
+
+const map = L.map('map', { center: [50.8, 19.8], zoom: 7 });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap', maxZoom: 18
+}).addTo(map);
+
+// ── MARKERS ──
+const statusColor = { critical: '#e05a2b', warning: '#d4a017', ok: '#3a9e6a' };
+
+function makeIcon(status) {
+  return L.divIcon({
+    html: `<div class="pin pin-${status}"></div>`,
+    iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -10], className: ''
+  });
+}
+
+// ── SHOW DEVICE ──
+function showDevice(d) {
+  document.getElementById('sb-empty').style.display = 'none';
+  const panel = document.getElementById('sb-panel');
+  panel.style.display = 'flex';
+
+  document.getElementById('p-name').textContent     = d.name;
+  document.getElementById('p-location').textContent = d.location;
+
+  const tag = document.getElementById('p-tag');
+  tag.className = `status-tag tag-${d.status}`;
+  tag.textContent = { critical: 'Krytyczny', warning: 'Monitoring', ok: 'Dobry' }[d.status];
+
+  document.getElementById('p-cal').textContent     = d.calAge;
+  document.getElementById('p-cli').textContent     = d.climateAge;
+  document.getElementById('p-install').textContent = `Zainstalowany ${d.installYear}`;
+  document.getElementById('p-design').textContent  = `Żywotność ${d.designLife} lat`;
+
+  const over   = d.climateAge - d.calAge;
+  const factor = (d.climateAge / d.calAge).toFixed(1);
+  document.getElementById('p-accel').innerHTML =
+    `Starzenie <strong>szybsze o ${over} lat</strong> względem wieku kalendarzowego (${factor}× przyspieszenie)`;
+
+  // Events table
+  const typeMap = {
+    heat:  { cls: 'col-heat',  dot: 'dot-heat',  label: 'Heat wave' },
+    flood: { cls: 'col-flood', dot: 'dot-flood', label: 'Flood' },
+    ice:   { cls: 'col-ice',   dot: 'dot-ice',   label: 'Ice storm' },
+    storm: { cls: 'col-storm', dot: 'dot-storm', label: 'Storm' },
+  };
+  const tbl = document.getElementById('p-events');
+  tbl.innerHTML = '';
+  d.events.forEach(ev => {
+    const t = typeMap[ev.type];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="ev-type"><div class="ev-type-dot ${t.dot}"></div></td>
+      <td class="ev-name">${ev.name}</td>
+      <td class="ev-date">${ev.date}</td>
+      <td class="ev-aging ${t.cls}">+${ev.aging.toFixed(1)} yr</td>
+    `;
+    tbl.appendChild(tr);
+  });
+
+  // Chart
+  const ctx = document.getElementById('forecast-chart').getContext('2d');
+  if (forecastChart) forecastChart.destroy();
+  const col = statusColor[d.status];
+  forecastChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031],
+      datasets: [{
+        data: d.forecast,
+        borderColor: col,
+        backgroundColor: col + '18',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+        pointBackgroundColor: col,
+        borderWidth: 1.5,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: c => `${c.parsed.y}% failure probability` }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#eee' }, ticks: { color: '#aaa', font: { size: 10 } } },
+        y: { grid: { color: '#eee' }, min: 0, max: 100,
+             ticks: { color: '#aaa', font: { size: 10 }, callback: v => v + '%' } }
+      }
+    }
+  });
+
+  // Assessment
+  const box = document.getElementById('p-assessment');
+  box.className = `assessment as-${d.rec.level}`;
+  document.getElementById('p-as-title').textContent = d.rec.title;
+  document.getElementById('p-as-desc').textContent  = d.rec.desc;
+
+  document.getElementById('sidebar').scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── ADD MARKERS ──
+devices.forEach(d => {
+  const m = L.marker([d.lat, d.lng], { icon: makeIcon(d.status) }).addTo(map);
+  m.bindPopup(`
+    <div class="pu-name">${d.name}</div>
+    <div class="pu-loc">${d.location}</div>
+    <div class="pu-ages">
+      <div class="pu-age cal"><div class="v">${d.calAge}</div><div class="l">kal.</div></div>
+      <div style="align-self:center;color:#ccc;font-size:14px">&#8594;</div>
+      <div class="pu-age cli"><div class="v">${d.climateAge}</div><div class="l">klim.</div></div>
+    </div>
+  `, { maxWidth: 180 });
+  m.on('click', () => showDevice(d));
+});
+
+window._show = id => { const d = devices.find(x => x.id === id); if (d) showDevice(d); };
+
+setTimeout(() => {
+  const kr = devices.find(d => d.id === 3);
+  if (kr) showDevice(kr);
+}, 400);
+</script>
+</body>
+</html>
