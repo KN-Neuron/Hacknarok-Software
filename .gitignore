@@ -1,0 +1,92 @@
+# --- General / OS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Thumbs.db:encryptable
+*.swp
+*.bak
+*.tmp
+*.log
+
+# --- Python (Backend) ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python Tools
+.pytest_cache/
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.ipynb_checkpoints
+
+# --- Node / Next.js (Frontend) ---
+node_modules/
+/out/
+/.next/
+.next/
+bin/
+build/
+
+# Next.js Telemetry
+.next/cache
+
+# Testing
+/coverage
+.nyc_output
+
+# Production
+build/
+dist/
+
+# --- Environment & Secrets ---
+# Keep your .env.example in git, but never the real ones!
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+.flaskenv
+
+# --- Databases ---
+*.sqlite3
+*.db
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
