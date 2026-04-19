@@ -1,0 +1,122 @@
+name: trustlayer
+
+# Uzywamy Docker Compose profili zeby uniknac duplikacji:
+#   docker compose --profile dev up    -> hot-reload dla obu serwisow
+#   docker compose --profile prod up   -> build + uruchomienie produkcyjne
+# Default (bez profilu) nie odpala nic.
+
+services:
+  # =========================================================
+  # DEV — hot reload, bind-mount kodu
+  # =========================================================
+  backend-dev:
+    profiles: ["dev"]
+    build:
+      context: ./backend
+      target: dev
+    container_name: trustlayer-backend-dev
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mount kodu -> uvicorn watchuje zmiany
+      - ./backend/app:/app/app:cached
+      # Anonimowy volume dla demo_data (zeby container je seedował)
+      - backend_demo:/app/app/demo_data
+    environment:
+      PYTHONPATH: /app
+      TRUSTLAYER_ENV: development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - trustlayer
+
+  frontend-dev:
+    profiles: ["dev"]
+    build:
+      context: ./frontend
+      target: dev
+    container_name: trustlayer-frontend-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Bind-mount wszystkiego poza node_modules i .next
+      - ./frontend/app:/app/app:cached
+      - ./frontend/components:/app/components:cached
+      - ./frontend/lib:/app/lib:cached
+      - ./frontend/public:/app/public:cached
+      - ./frontend/next.config.mjs:/app/next.config.mjs:cached
+      - ./frontend/tailwind.config.mjs:/app/tailwind.config.mjs:cached
+      - ./frontend/postcss.config.mjs:/app/postcss.config.mjs:cached
+      - ./frontend/tsconfig.json:/app/tsconfig.json:cached
+      # Anonimowe volumes dla node_modules i .next (zostaja w kontenerze)
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      BACKEND_URL: http://backend-dev:8000
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      backend-dev:
+        condition: service_healthy
+    networks:
+      - trustlayer
+
+  # =========================================================
+  # PROD — build + statyczny serve, non-root, zdrowie
+  # =========================================================
+  backend:
+    profiles: ["prod"]
+    build:
+      context: ./backend
+      target: prod
+    image: trustlayer/backend:latest
+    container_name: trustlayer-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_data:/app/app/demo_data
+    environment:
+      TRUSTLAYER_ENV: production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - trustlayer
+
+  frontend:
+    profiles: ["prod"]
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        BACKEND_URL: http://backend:8000
+    image: trustlayer/frontend:latest
+    container_name: trustlayer-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      BACKEND_URL: http://backend:8000
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - trustlayer
+
+networks:
+  trustlayer:
+    driver: bridge
+
+volumes:
+  backend_demo:        # dev
+  backend_data:        # prod

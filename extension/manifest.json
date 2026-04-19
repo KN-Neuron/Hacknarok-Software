@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "TrustLayer for Telegram",
+  "short_name": "TrustLayer",
+  "description": "Content Credentials overlay for Telegram Web — wykrywa scamy, deepfake'i i weryfikuje podpisy C2PA w wiadomościach.",
+  "version": "0.1.0",
+  "action": {},
+  "permissions": ["storage"],
+  "host_permissions": ["https://web.telegram.org/*", "http://localhost:8000/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://web.telegram.org/*"],
+      "css": ["content.css"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

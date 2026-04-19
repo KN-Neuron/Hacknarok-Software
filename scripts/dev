@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# =====================================================================
+# trustlayer-dev — jedno wejście do zarządzania projektem
+#
+# Użycie:
+#   ./scripts/dev up           — odpala cały stack dev (backend + front, hot reload)
+#   ./scripts/dev down         — zatrzymuje i czyści
+#   ./scripts/dev logs [svc]   — śledzi logi (bez arg = oba)
+#   ./scripts/dev restart svc  — restart konkretnego serwisu
+#   ./scripts/dev shell svc    — sh wewnątrz kontenera (svc = backend|frontend)
+#   ./scripts/dev reset-db     — czyści demo data i re-seeduje
+#   ./scripts/dev test         — odpala testy backendu
+#   ./scripts/dev status       — zdrowie usług
+#   ./scripts/dev prod         — build + uruchomienie prod
+#   ./scripts/dev rebuild      — force rebuild obrazów (przy zmianie deps)
+#   ./scripts/dev watch        — śledzi pliki, pokazuje co się zmieniło (diagnostyka hot reload)
+# =====================================================================
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+# Kolory — ładny output
+C_RESET='\033[0m'
+C_DIM='\033[2m'
+C_B='\033[1m'
+C_G='\033[32m'
+C_Y='\033[33m'
+C_R='\033[31m'
+C_C='\033[36m'
+
+log()   { printf "${C_C}▸${C_RESET} %s\n" "$*"; }
+warn()  { printf "${C_Y}⚠${C_RESET} %s\n" "$*"; }
+die()   { printf "${C_R}✗${C_RESET} %s\n" "$*" >&2; exit 1; }
+ok()    { printf "${C_G}✓${C_RESET} %s\n" "$*"; }
+
+require_docker() {
+    command -v docker >/dev/null || die "Docker nie jest zainstalowany."
+    docker compose version >/dev/null 2>&1 || die "Docker Compose v2 wymagany."
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    up|start)
+        require_docker
+        log "Uruchamiam TrustLayer (dev mode, hot-reload)..."
+        docker compose --profile dev up --build -d
+        ok "Backend:  http://localhost:8000/docs"
+        ok "Frontend: http://localhost:3000"
+        ok "Logi:     ./scripts/dev logs"
+        ;;
+
+    down|stop)
+        require_docker
+        log "Zatrzymuję TrustLayer..."
+        docker compose --profile dev --profile prod down
+        ok "Zatrzymane."
+        ;;
+
+    nuke)
+        require_docker
+        warn "Usunę WSZYSTKO: kontenery + volumes + obrazy TrustLayer"
+        read -p "Na pewno? [y/N] " -n 1 -r; echo
+        [[ "$REPLY" =~ ^[Yy]$ ]] || { log "Anulowane."; exit 0; }
+        docker compose --profile dev --profile prod down -v --rmi local
+        ok "Wyczyszczone."
+        ;;
+
+    logs)
+        require_docker
+        svc="${1:-}"
+        if [[ -z "$svc" ]]; then
+            docker compose --profile dev logs -f --tail=100
+        else
+            docker compose --profile dev logs -f --tail=100 "${svc}-dev"
+        fi
+        ;;
+
+    restart)
+        require_docker
+        svc="${1:?Podaj serwis: backend | frontend}"
+        log "Restartuję ${svc}-dev..."
+        docker compose --profile dev restart "${svc}-dev"
+        ok "OK."
+        ;;
+
+    shell|sh)
+        require_docker
+        svc="${1:?Podaj serwis: backend | frontend}"
+        case "$svc" in
+            backend)  docker compose --profile dev exec backend-dev bash ;;
+            frontend) docker compose --profile dev exec frontend-dev sh ;;
+            *) die "Nieznany serwis: $svc" ;;
+        esac
+        ;;
+
+    reset-db|reseed)
+        require_docker
+        log "Resetuję bazę demo..."
+        curl -sf -X POST http://localhost:8000/api/demo/reset \
+            && ok "Demo zaseedowane." \
+            || die "Nie udało się — czy backend działa? (./scripts/dev up)"
+        ;;
+
+    test)
+        require_docker
+        log "Odpalam testy backendu w kontenerze..."
+        docker compose --profile dev exec backend-dev \
+            python -m pytest -v tests/ 2>/dev/null \
+            || docker compose --profile dev exec backend-dev \
+                python -c "
+from app import seed
+from app.services import verifier
+state = seed.seed_all()
+msgs = state['scenarios']['whatsapp']['messages']
+verified = sum(1 for m in msgs if verifier.verify_text(m['text']).status.value == 'verified')
+print(f'✓ {verified}/{len(msgs)} wiadomości verified')
+print(f'✓ Seed: {len(state[\"users\"])} users, {len(state[\"scenarios\"])} scenarios')
+"
+        ;;
+
+    status|ps)
+        require_docker
+        log "Status kontenerów:"
+        docker compose --profile dev --profile prod ps
+        echo
+        log "Zdrowie endpointów:"
+        curl -sf http://localhost:8000/api/health > /dev/null \
+            && ok "backend  /api/health → 200" \
+            || warn "backend  niedostępny"
+        curl -sf http://localhost:3000/ > /dev/null \
+            && ok "frontend /          → 200" \
+            || warn "frontend niedostępny"
+        ;;
+
+    prod)
+        require_docker
+        log "Build + uruchomienie prod..."
+        docker compose --profile prod up --build -d
+        ok "Prod na portach 8000/3000."
+        ;;
+
+    rebuild)
+        require_docker
+        log "Force rebuild obrazów (cache invalidated)..."
+        docker compose --profile dev build --no-cache
+        ok "Gotowe. Odpal: ./scripts/dev up"
+        ;;
+
+    watch)
+        log "Tryb diagnostyczny: śledzę zmiany plików (Ctrl+C żeby zakończyć)"
+        warn "Ten tryb nie uruchamia serwerów — pokazuje co by wywołało hot reload."
+        if command -v fswatch >/dev/null; then
+            fswatch -r --event Created --event Updated --event Removed \
+                backend/app frontend/app frontend/components frontend/lib 2>/dev/null
+        elif command -v inotifywait >/dev/null; then
+            inotifywait -mr -e modify,create,delete --format '%T %w%f %e' --timefmt '%H:%M:%S' \
+                backend/app frontend/app frontend/components frontend/lib
+        else
+            die "Zainstaluj fswatch (macOS) lub inotify-tools (Linux)."
+        fi
+        ;;
+
+    snapshot)
+        # Szybki snapshot projektu do zipa (bez node_modules, .next, pycache)
+        name="trustlayer-$(date +%Y%m%d-%H%M%S).zip"
+        log "Tworzę snapshot: $name"
+        zip -qr "$name" . \
+            -x '*/node_modules/*' \
+            -x '*/.next/*' \
+            -x '*/__pycache__/*' \
+            -x '*.pyc' \
+            -x '*/trustlayer.db*' \
+            -x '*/demo_data/*.json' \
+            -x '.git/*'
+        ok "Zapisane: $name"
+        ;;
+
+    help|--help|-h|"")
+        sed -n '/^# ====/,/^# ====/p' "${BASH_SOURCE[0]}" | \
+            grep -E '^#( |$)' | sed 's/^# //; s/^#$//'
+        ;;
+
+    *)
+        die "Nieznane polecenie: $cmd. Użyj './scripts/dev help'."
+        ;;
+esac

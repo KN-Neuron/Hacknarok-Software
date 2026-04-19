@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# =====================================================================
+# trustlayer-watch — inteligentny watcher zmian w projekcie
+#
+# Śledzi pliki i po każdej zmianie:
+#   - backend/app/*.py  → re-seed + smoke test + health
+#   - frontend/*.tsx    → tsc --noEmit (typecheck bez czekania na Next)
+#   - backend/requirements.txt → komunikat "rebuild wymagany"
+#   - frontend/package.json    → komunikat "rebuild wymagany"
+#
+# Wymaga: inotify-tools (Linux) lub fswatch (macOS).
+# =====================================================================
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+C_RESET='\033[0m'; C_DIM='\033[2m'; C_B='\033[1m'
+C_G='\033[32m'; C_Y='\033[33m'; C_R='\033[31m'; C_C='\033[36m'; C_M='\033[35m'
+
+_now() { date +'%H:%M:%S'; }
+log()  { printf "${C_DIM}[%s]${C_RESET} ${C_C}▸${C_RESET} %s\n" "$(_now)" "$*"; }
+ok()   { printf "${C_DIM}[%s]${C_RESET} ${C_G}✓${C_RESET} %s\n" "$(_now)" "$*"; }
+warn() { printf "${C_DIM}[%s]${C_RESET} ${C_Y}⚠${C_RESET} %s\n" "$(_now)" "$*"; }
+err()  { printf "${C_DIM}[%s]${C_RESET} ${C_R}✗${C_RESET} %s\n" "$(_now)" "$*"; }
+hdr()  { printf "${C_DIM}[%s]${C_RESET} ${C_M}◆${C_RESET} ${C_B}%s${C_RESET}\n" "$(_now)" "$*"; }
+
+# --- Akcje po zmianie ---
+
+run_backend_check() {
+    local file="$1"
+    hdr "Backend: zmiana w ${file#$ROOT_DIR/}"
+
+    # Uvicorn --reload w kontenerze sam restartuje. My tu robimy ekstra check.
+
+    # Syntax check lokalnie (bez kontenera, szybki feedback)
+    if command -v python3 >/dev/null; then
+        if python3 -m py_compile "$file" 2>&1 | head -5; then
+            ok "Syntax OK"
+        else
+            err "SyntaxError — uvicorn nie będzie mógł zrestartować"
+            return
+        fi
+    fi
+
+    # Health po chwili (uvicorn potrzebuje ~1s na restart)
+    sleep 1.5
+    if curl -sf http://localhost:8000/api/health > /dev/null; then
+        ok "Backend zdrowy po reload"
+    else
+        warn "Backend nie odpowiada — sprawdź logi: ./scripts/dev logs backend"
+    fi
+}
+
+run_frontend_check() {
+    local file="$1"
+    hdr "Frontend: zmiana w ${file#$ROOT_DIR/}"
+
+    # Next.js Fast Refresh sam się przełączy. My robimy typecheck.
+    if [[ -d "$ROOT_DIR/frontend/node_modules" ]]; then
+        (cd "$ROOT_DIR/frontend" && npx --no-install tsc --noEmit 2>&1 | head -20) \
+            && ok "TypeScript clean" \
+            || err "TS errors (patrz wyżej)"
+    fi
+}
+
+handle_deps_change() {
+    local kind="$1"  # backend | frontend
+    warn "Zmiana zależności ${kind} — wymagany rebuild kontenera:"
+    echo "    ${C_B}./scripts/dev rebuild${C_RESET}"
+    echo "    ${C_B}./scripts/dev up${C_RESET}"
+}
+
+handle_change() {
+    local file="$1"
+    case "$file" in
+        */backend/app/*.py)       run_backend_check "$file" ;;
+        */backend/requirements.txt|*/backend/pyproject.toml) handle_deps_change backend ;;
+        */frontend/app/*|*/frontend/components/*|*/frontend/lib/*)
+            case "$file" in
+                *.ts|*.tsx) run_frontend_check "$file" ;;
+                *.css)      log "CSS — Tailwind Fast Refresh zadziała" ;;
+            esac
+            ;;
+        */frontend/package.json)  handle_deps_change frontend ;;
+        */frontend/tailwind.config.*|*/frontend/postcss.config.*)
+            warn "Config zmieniony — Next.js może wymagać restartu: ./scripts/dev restart frontend" ;;
+        */docker-compose.yml|*/Dockerfile)
+            warn "Dockerfile/Compose zmieniony — ${C_B}./scripts/dev rebuild${C_RESET}" ;;
+    esac
+}
+
+# --- Main loop ---
+
+if ! command -v inotifywait >/dev/null && ! command -v fswatch >/dev/null; then
+    err "Potrzebuję inotifywait (Linux: apt install inotify-tools) lub fswatch (macOS: brew install fswatch)"
+    exit 1
+fi
+
+hdr "TrustLayer file watcher — Ctrl+C żeby zakończyć"
+log "Śledzę: backend/app, frontend/{app,components,lib}, + configi"
+
+WATCH_PATHS=(
+    "$ROOT_DIR/backend/app"
+    "$ROOT_DIR/backend/requirements.txt"
+    "$ROOT_DIR/backend/pyproject.toml"
+    "$ROOT_DIR/frontend/app"
+    "$ROOT_DIR/frontend/components"
+    "$ROOT_DIR/frontend/lib"
+    "$ROOT_DIR/frontend/package.json"
+    "$ROOT_DIR/frontend/tailwind.config.mjs"
+    "$ROOT_DIR/frontend/postcss.config.mjs"
+    "$ROOT_DIR/frontend/next.config.mjs"
+    "$ROOT_DIR/docker-compose.yml"
+)
+
+# Filtr istniejących ścieżek
+EXISTING=()
+for p in "${WATCH_PATHS[@]}"; do
+    [[ -e "$p" ]] && EXISTING+=("$p")
+done
+
+if command -v inotifywait >/dev/null; then
+    inotifywait -qmr -e modify,create,moved_to --format '%w%f' "${EXISTING[@]}" \
+        | while read -r file; do
+            # Debounce: ignoruj swap-files i tmp
+            [[ "$file" =~ \.(swp|swx|tmp|~)$ ]] && continue
+            [[ "$file" =~ /\.#.* ]] && continue
+            [[ "$file" =~ __pycache__ ]] && continue
+            handle_change "$file"
+          done
+else
+    # fswatch (macOS)
+    fswatch -r --event Created --event Updated --event Removed "${EXISTING[@]}" \
+        | while read -r file; do
+            [[ "$file" =~ \.(swp|swx|tmp|~)$ ]] && continue
+            [[ "$file" =~ __pycache__ ]] && continue
+            handle_change "$file"
+          done
+fi

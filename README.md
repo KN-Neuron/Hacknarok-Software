@@ -44,17 +44,59 @@ Plus: **Integrity Clash detection** — wykrycie sprzeczności typu "manifest m�
 
 ## Uruchomienie
 
-```bash
-# Backend
-cd backend
-poetry install
-poetry run uvicorn app.main:app --reload --port 8000
+### Opcja A — Docker (rekomendowana)
 
-# Frontend
+```bash
+cp .env.example .env   # opcjonalnie, domyślne wartości działają
+./scripts/dev up       # backend + frontend, hot reload
+```
+
+- Backend: http://localhost:8000/docs
+- Frontend: http://localhost:3000
+
+**Wszystkie komendy:**
+
+```bash
+./scripts/dev up          # odpalenie stacku dev (hot reload obu serwisów)
+./scripts/dev down        # zatrzymanie
+./scripts/dev logs        # logi obu serwisów
+./scripts/dev logs backend # tylko backend
+./scripts/dev restart backend  # restart pojedynczego serwisu
+./scripts/dev shell backend    # bash wewnątrz kontenera
+./scripts/dev reset-db    # re-seed demo data bez restartu
+./scripts/dev status      # zdrowie usług
+./scripts/dev rebuild     # force rebuild obrazów (po zmianie deps)
+./scripts/dev prod        # tryb produkcyjny
+./scripts/dev snapshot    # zip projektu bez śmieci
+
+./scripts/watch           # watcher + auto-testy po każdej zmianie
+./scripts/check           # pełen smoke test całego systemu
+```
+
+Lub `make up` / `make check` / `make watch` itd.
+
+### Opcja B — lokalnie bez Dockera
+
+```bash
+# Terminal 1
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+# Terminal 2
 cd frontend
 npm install
 npm run dev
 ```
 
-Frontend: http://localhost:3000
-Backend: http://localhost:8000/docs
+## Workflow developerski
+
+**Zmiana w kodzie backendu** (`backend/app/*.py`): uvicorn w kontenerze wykryje i zrestartuje automatycznie. Healthcheck wraca w <2s.
+
+**Zmiana w kodzie frontu** (`frontend/app/*.tsx`): Next.js Fast Refresh — zmiany widoczne w przeglądarce bez utraty state.
+
+**Zmiana w `requirements.txt` / `package.json`**: `./scripts/dev rebuild && ./scripts/dev up`.
+
+**Zmiana w `Dockerfile` / `docker-compose.yml`**: `./scripts/dev rebuild`.
+
+**Po zmianie chcesz sprawdzić że nic się nie zepsuło**: `./scripts/check` — 15 asercji E2E przez całą ścieżkę od API do scenariuszy.

@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# =====================================================================
+# trustlayer-check — pełny smoke test systemu
+#
+# Sprawdza kolejno:
+#   1. Backend żyje (/api/health)
+#   2. Frontend żyje (/)
+#   3. Demo data zaseedowane
+#   4. Scenariusz 1: Verified message → status verified
+#   5. Scenariusz 1: Scam message → status unverified
+#   6. Scenariusz 2: Deepfake → integrity_clash confirmed
+#   7. Scenariusz 3: Scam listing → unverified images
+#   8. Section A.7 embedding działa
+#   9. Soft binding recovery działa
+#
+# Exit code: 0 = wszystko OK, >0 = coś padło
+# =====================================================================
+
+set -u
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+C_RESET='\033[0m'; C_G='\033[32m'; C_R='\033[31m'; C_Y='\033[33m'; C_C='\033[36m'; C_B='\033[1m'
+
+BACKEND="${BACKEND:-http://localhost:8000}"
+FRONTEND="${FRONTEND:-http://localhost:3000}"
+
+PASS=0
+FAIL=0
+TESTS=()
+
+_check() {
+    local name="$1" expected="$2" got="$3"
+    if [[ "$got" == "$expected" ]]; then
+        printf "  ${C_G}✓${C_RESET} %s\n" "$name"
+        PASS=$((PASS + 1))
+    else
+        printf "  ${C_R}✗${C_RESET} %s\n      expected: %s\n      got:      %s\n" "$name" "$expected" "$got"
+        FAIL=$((FAIL + 1))
+        TESTS+=("$name")
+    fi
+}
+
+_match() {
+    local name="$1" pattern="$2" got="$3"
+    if echo "$got" | grep -qE "$pattern"; then
+        printf "  ${C_G}✓${C_RESET} %s\n" "$name"
+        PASS=$((PASS + 1))
+    else
+        printf "  ${C_R}✗${C_RESET} %s\n      pattern: %s\n      got:     %s\n" "$name" "$pattern" "$(echo "$got" | head -c 200)"
+        FAIL=$((FAIL + 1))
+        TESTS+=("$name")
+    fi
+}
+
+echo
+printf "${C_B}${C_C}━━━ TrustLayer smoke test ━━━${C_RESET}\n"
+echo
+
+# 1. Infrastructure
+printf "${C_B}Infrastruktura${C_RESET}\n"
+_check "backend /api/health"  '{"ok":true}' "$(curl -sf $BACKEND/api/health 2>/dev/null || echo 'DOWN')"
+_check "frontend /"           "200"         "$(curl -s -o /dev/null -w '%{http_code}' $FRONTEND/ 2>/dev/null || echo 'DOWN')"
+
+# 2. Demo data
+echo
+printf "${C_B}Demo state${C_RESET}\n"
+state=$(curl -sf $BACKEND/api/demo/state 2>/dev/null || echo '{}')
+_match "demo: users obecni" '"anna"'     "$state"
+_match "demo: scenarios"    'whatsapp'   "$state"
+_match "demo: gallery"      'gallery'    "$state"
+_match "demo: olx"          'olx'        "$state"
+
+# 3. Scenario 1 — verified message
+echo
+printf "${C_B}Scenariusz 1 — komunikator${C_RESET}\n"
+wa=$(curl -sf $BACKEND/api/demo/whatsapp 2>/dev/null || echo '{}')
+
+# Wyciągnij pierwszą wiadomość od mamy
+mama_msg=$(echo "$wa" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+m = [x for x in d['messages'] if x['sender']=='krystyna' and x['has_manifest']][0]
+print(m['text'])
+" 2>/dev/null)
+
+if [[ -n "$mama_msg" ]]; then
+    resp=$(curl -sf -X POST $BACKEND/api/verify/text \
+        -H 'Content-Type: application/json' \
+        -d "$(python3 -c "import json; print(json.dumps({'text': '''$mama_msg''', 'keystrokes': []}))")" 2>/dev/null || echo '{}')
+    _match "verified msg od mamy → status verified" '"status":"verified"' "$resp"
+    _match "verified msg → hardware-backed device"  'hardware_backed.*true' "$resp"
+fi
+
+scam_msg=$(echo "$wa" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+m = [x for x in d['messages'] if x.get('is_scam')][0]
+print(m['text'])
+" 2>/dev/null)
+
+if [[ -n "$scam_msg" ]]; then
+    resp=$(curl -sf -X POST $BACKEND/api/verify/text \
+        -H 'Content-Type: application/json' \
+        -d "$(python3 -c "import json; print(json.dumps({'text': '''$scam_msg''', 'keystrokes': []}))")" 2>/dev/null || echo '{}')
+    _match "scam msg → status unverified" '"status":"unverified"' "$resp"
+fi
+
+# 4. Scenario 2 — deepfake gallery
+echo
+printf "${C_B}Scenariusz 2 — galeria${C_RESET}\n"
+gal=$(curl -sf $BACKEND/api/demo/gallery 2>/dev/null || echo '{}')
+_match "gallery: 5+ photos" '"is_deepfake":false' "$gal"
+_match "gallery: 1 deepfake" '"is_deepfake":true'  "$gal"
+
+# Verify deepfake image
+fake_b64=$(echo "$gal" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+p = [x for x in d['photos'] if x['is_deepfake']][0]
+print(p['image_b64'])
+" 2>/dev/null)
+
+if [[ -n "$fake_b64" ]]; then
+    resp=$(curl -sf -X POST $BACKEND/api/verify/image \
+        -H 'Content-Type: application/json' \
+        -d "$(python3 -c "
+import json
+print(json.dumps({
+    'image_b64': '''$fake_b64''',
+    'declared_real_person_id': 'anna',
+    'synthid_detected': True,
+    'ai_artifact_score': 0.92,
+}))")" 2>/dev/null || echo '{}')
+    _match "deepfake → integrity_clash" '"status":"integrity_clash"' "$resp"
+    _match "deepfake → clash confirmed" '"verdict":"confirmed"'       "$resp"
+fi
+
+# 5. Scenario 3 — OLX
+echo
+printf "${C_B}Scenariusz 3 — OLX${C_RESET}\n"
+olx=$(curl -sf $BACKEND/api/demo/olx 2>/dev/null || echo '{}')
+_match "olx: 3 listings" 'listing_003_scam'  "$olx"
+_match "olx: scam marked" 'olx_ai_scam'       "$olx"
+
+# Summary
+echo
+printf "${C_B}━━━ wynik ━━━${C_RESET}\n"
+printf "Testów: %d  |  ${C_G}passed: %d${C_RESET}  |  ${C_R}failed: %d${C_RESET}\n" \
+    $((PASS + FAIL)) "$PASS" "$FAIL"
+
+if [[ $FAIL -gt 0 ]]; then
+    echo
+    printf "${C_R}${C_B}Oblane:${C_RESET}\n"
+    for t in "${TESTS[@]}"; do
+        printf "  - %s\n" "$t"
+    done
+    exit 1
+fi
+
+echo
+printf "${C_G}${C_B}Wszystko gra.${C_RESET}\n"

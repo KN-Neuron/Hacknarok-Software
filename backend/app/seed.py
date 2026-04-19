@@ -35,8 +35,41 @@ from .api import sign_router
 _DEMO_FILE = Path(__file__).parent / "demo_data" / "demo_state.json"
 _DEMO_FILE.parent.mkdir(exist_ok=True)
 
+_IMAGES_DIR = Path(__file__).parent / "demo_data" / "images"
+_IMAGES_DIR.mkdir(exist_ok=True)
 
-# ---------- Helpers do generowania placeholder-obrazków ----------
+
+# ---------- Helpers do ładowania / generowania obrazków ----------
+
+def _load_image_file(filename: str) -> bytes | None:
+    """
+    Próbuje załadować rzeczywisty plik obrazu z demo_data/images/.
+    Wspiera .jpg, .jpeg, .png, .webp. Zwraca JPEG bytes (konwertuje jeśli trzeba),
+    lub None jeśli plik nie istnieje.
+    """
+    stem = Path(filename).stem
+    candidates = [
+        _IMAGES_DIR / f"{stem}.jpg",
+        _IMAGES_DIR / f"{stem}.jpeg",
+        _IMAGES_DIR / f"{stem}.png",
+        _IMAGES_DIR / f"{stem}.webp",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                img = Image.open(p).convert("RGB")
+                # Downsize jeśli za duże (żeby base64 nie był monstrualny)
+                max_dim = 1280
+                if max(img.size) > max_dim:
+                    img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85, optimize=True)
+                return buf.getvalue()
+            except Exception as e:
+                print(f"[seed] Failed to load {p}: {e}")
+                return None
+    return None
+
 
 def _make_image(text: str, color: tuple[int, int, int], size=(800, 600)) -> bytes:
     """Generuje proste zdjęcie placeholder z tekstem (zamiast prawdziwych zdjęć w demo)."""
@@ -314,23 +347,27 @@ def _seed_whatsapp(state: dict) -> dict:
 # ---------- Scenario 2: Gallery ----------
 
 def _seed_gallery(state: dict) -> dict:
-    """5 podpisanych zdjęć Anny + 1 deepfake."""
+    """5 podpisanych zdjęć Anny + 1 deepfake.
+
+    Jeśli w demo_data/images/ leżą pliki o nazwach z `filename` kolumny,
+    zostaną użyte. W przeciwnym razie fallback do kolorowych placeholderów.
+    """
     photos = []
 
-    # Autentyczne zdjęcia podpisane Pixel 9 Pro
+    # (title, filename_stem, fallback_color)
     real_specs = [
-        ("Anna na wakacjach", (88, 130, 180)),
-        ("Anna z przyjaciółmi", (200, 100, 100)),
-        ("Anna selfie kawiarnia", (150, 90, 70)),
-        ("Anna na uczelni", (120, 130, 90)),
-        ("Anna portret", (90, 90, 120)),
+        ("Anna na wakacjach",    "wakacje",    (88, 130, 180)),
+        ("Anna z przyjaciółmi",  "przyjaciele",(200, 100, 100)),
+        ("Anna selfie kawiarnia","kawiarnia",  (150, 90, 70)),
+        ("Anna na uczelni",      "uczelnia",   (120, 130, 90)),
+        ("Anna portret",         "portret",    (90, 90, 120)),
     ]
 
     cred = state["credentials"]["anna"]
     cred_full = store.get_credential(cred["credential_id"])
 
-    for title, color in real_specs:
-        img_bytes = _make_image(title, color)
+    for title, fname, color in real_specs:
+        img_bytes = _load_image_file(fname) or _make_image(title, color)
         out = signer.sign_image(
             image_bytes=img_bytes, mime="image/jpeg",
             user_id="anna",
@@ -349,10 +386,10 @@ def _seed_gallery(state: dict) -> dict:
         })
 
     # Deepfake — bez podpisu Anny, z sygnałem SynthID
-    fake_bytes = _make_image("[FAKE] AI-generated", (60, 30, 30))
+    fake_bytes = _load_image_file("astronauta") or _make_image("[FAKE] AI-generated", (60, 30, 30))
     photos.append({
         "id": "photo_deepfake_001",
-        "title": "Rzekome zdjęcie 'Anny' — opublikowane przez nieznane konto",
+        "title": "Rzekome zdjęcie 'Anny' — astronautka NASA (viralowe na X)",
         "image_b64": _b64(fake_bytes),
         "manifest_id": None,
         "has_manifest": False,
