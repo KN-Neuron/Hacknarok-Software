@@ -168,6 +168,7 @@ const POSTS: SocialPost[] = [
     likes: 3_200,
     comments: 144,
     status: "unverified",
+    photoTitle: "Mem uczelniany — źródło nieznane",
     fallbackTone: "stock",
     details: {
       timestamp: "dzisiaj, 12:45",

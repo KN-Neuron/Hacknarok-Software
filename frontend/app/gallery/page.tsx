@@ -18,8 +18,8 @@ export default function GalleryPage() {
     api.gallery().then((d) => setPhotos(d.photos));
   }, []);
 
-  const realPhotos = photos.filter((p) => !p.is_deepfake);
-  const fakePhotos = photos.filter((p) => p.is_deepfake);
+  const realPhotos = photos.filter((p) => !p.is_deepfake && p.scenario !== "external");
+  const fakePhotos = photos.filter((p) => p.is_deepfake && p.scenario !== "external");
 
   return (
     <div className="relative z-10 min-h-screen px-6 md:px-12 py-8 max-w-6xl mx-auto">

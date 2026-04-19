@@ -401,6 +401,20 @@ def _seed_gallery(state: dict) -> dict:
         "declared_real_person_id": "anna",
     })
 
+    # --- External media used by SocialFeed (not Anna's gallery) ---
+    # Te wpisy są oznaczone `scenario="external"` żeby gallery/page.tsx
+    # mógł je odfiltrować z głównej siatki "zdjęć Anny".
+    meme_bytes = _load_image_file("meme_uczelnia") or _make_image("Mem (źródło nieznane)", (110, 90, 130))
+    photos.append({
+        "id": "photo_meme_uczelnia",
+        "title": "Mem uczelniany — źródło nieznane",
+        "image_b64": _b64(meme_bytes),
+        "manifest_id": None,
+        "has_manifest": False,
+        "is_deepfake": False,
+        "scenario": "external",
+    })
+
     return {"photos": photos}
 
 
