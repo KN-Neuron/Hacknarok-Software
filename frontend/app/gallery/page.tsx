@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { api, type DemoPhoto, type VerificationResult } from "@/lib/api";
 import { CrIcon } from "@/components/nutrition/CrIcon";
 import { NutritionSheet } from "@/components/nutrition/NutritionSheet";
+import { SocialFeed } from "@/components/gallery/SocialFeed";
 
 export default function GalleryPage() {
   const [photos, setPhotos] = useState<DemoPhoto[]>([]);
@@ -98,6 +99,29 @@ export default function GalleryPage() {
             />
           ))}
           <ReportCard photo={fakePhotos[0]} />
+        </div>
+      </section>
+
+      {/* Social feed — full spectrum of verification states */}
+      <section className="mt-24">
+        <SectionHeading
+          eyebrow="Scenariusz 02b — Cross-checking w social media"
+          title="Te same zdjęcia, różne źródła"
+          right={
+            <div className="flex items-center gap-2 text-xs text-ink-400 font-mono">
+              <ShieldCheck size={12} />
+              verified · recovered · clash · tampered · unverified
+            </div>
+          }
+        />
+        <p className="text-sm text-ink-300 leading-relaxed mt-4 max-w-2xl">
+          Co się dzieje, gdy te same treści krążą po Instagramie, X i LinkedIn? TrustLayer
+          pokazuje cały spektrum: legalne AI z deklaracją, repost z odzyskanym podpisem,
+          deepfake na koncie udającym redakcję i oryginał, którego ktoś subtelnie podretuszował.
+        </p>
+
+        <div className="mt-6">
+          <SocialFeed photos={photos} />
         </div>
       </section>
 

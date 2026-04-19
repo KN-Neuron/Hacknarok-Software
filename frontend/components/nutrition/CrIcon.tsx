@@ -12,7 +12,13 @@ interface Props {
   className?: string;
 }
 
-export function CrIcon({ status, size = "md", pulse = false, onClick, className }: Props) {
+export function CrIcon({
+  status,
+  size = "md",
+  pulse = false,
+  onClick,
+  className,
+}: Props) {
   const sizes = {
     sm: "w-5 h-5 text-[0.55rem]",
     md: "w-6 h-6 text-[0.6rem]",
@@ -20,15 +26,17 @@ export function CrIcon({ status, size = "md", pulse = false, onClick, className 
   };
 
   const ring = {
-    verified:        "border-verified/60 bg-verified/8",
-    recovered:       "border-recovered/60 bg-recovered/8",
+    verified: "border-verified/60 bg-verified/8",
+    recovered: "border-recovered/60 bg-recovered/8",
     integrity_clash: "border-clash/70 bg-clash/12",
-    tampered:        "border-clash/70 bg-clash/12",
-    unverified:      "border-unverified/60 bg-unverified/10",
+    tampered: "border-clash/70 bg-clash/12",
+    unverified: "border-unverified/60 bg-unverified/10",
   }[status];
 
+  const Component = onClick ? motion.button : motion.div;
+
   return (
-    <motion.button
+    <Component
       whileHover={{ scale: 1.08 }}
       whileTap={{ scale: 0.95 }}
       onClick={onClick}
@@ -46,17 +54,19 @@ export function CrIcon({ status, size = "md", pulse = false, onClick, className 
       <span className="tracking-tight">CR</span>
 
       {/* Kropka statusu w prawym górnym rogu */}
-      <span className={cn(
-        "absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full",
-        status === "verified"        && "bg-verified",
-        status === "recovered"       && "bg-recovered",
-        status === "integrity_clash" && "bg-clash",
-        status === "tampered"        && "bg-clash",
-        status === "unverified"      && "bg-unverified",
-        pulse && "animate-pulse-soft",
-      )} />
+      <span
+        className={cn(
+          "absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full",
+          status === "verified" && "bg-verified",
+          status === "recovered" && "bg-recovered",
+          status === "integrity_clash" && "bg-clash",
+          status === "tampered" && "bg-clash",
+          status === "unverified" && "bg-unverified",
+          pulse && "animate-pulse-soft",
+        )}
+      />
 
       <span className="sr-only">{statusShortLabel(status)}</span>
-    </motion.button>
+    </Component>
   );
 }

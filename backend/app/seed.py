@@ -163,7 +163,7 @@ def seed_all() -> dict:
     # --- SCENARIO 3: OLX scam ---
     state["scenarios"]["olx"] = _seed_olx(state)
 
-    with _DEMO_FILE.open("w") as f:
+    with _DEMO_FILE.open("w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
 
     return state
@@ -410,12 +410,17 @@ def _seed_olx(state: dict) -> dict:
     """3 ogłoszenia: 2 legit, 1 scam."""
     listings = []
 
-    # Legit 1 — Piotr
+    # Legit 1 — Piotr (Kawalerka Świdnicka)
     cred_p = state["credentials"]["piotr"]
     cred_p_full = store.get_credential(cred_p["credential_id"])
     legit1_imgs = []
-    for i, color in enumerate([(150, 130, 110), (140, 120, 100), (160, 140, 120)]):
-        img = _make_image(f"Mieszkanie 1 — zdj {i+1}", color)
+    legit1_specs = [
+        ("mieszkanie1_1", (150, 130, 110)),
+        ("mieszkanie1_2", (140, 120, 100)),
+        ("mieszkanie1_3", (160, 140, 120)),
+    ]
+    for fname, color in legit1_specs:
+        img = _load_image_file(fname) or _make_image(f"Mieszkanie 1 — {fname}", color)
         out = signer.sign_image(
             image_bytes=img, mime="image/jpeg",
             user_id="piotr",
@@ -438,12 +443,16 @@ def _seed_olx(state: dict) -> dict:
         "has_manifest": True,
     })
 
-    # Legit 2 — Marek
+    # Legit 2 — Marek (2-pok Krzyki)
     cred_m = state["credentials"]["marek"]
     cred_m_full = store.get_credential(cred_m["credential_id"])
     legit2_imgs = []
-    for i, color in enumerate([(180, 160, 130), (170, 150, 120)]):
-        img = _make_image(f"Mieszkanie 2 — zdj {i+1}", color)
+    legit2_specs = [
+        ("mieszkanie2_1", (180, 160, 130)),
+        ("mieszkanie2_2", (170, 150, 120)),
+    ]
+    for fname, color in legit2_specs:
+        img = _load_image_file(fname) or _make_image(f"Mieszkanie 2 — {fname}", color)
         out = signer.sign_image(
             image_bytes=img, mime="image/jpeg",
             user_id="marek",
@@ -468,8 +477,13 @@ def _seed_olx(state: dict) -> dict:
 
     # Scam — AI-generated bez podpisu, podejrzanie tania cena
     scam_imgs = []
-    for i, color in enumerate([(100, 50, 130), (110, 60, 140), (120, 70, 150)]):
-        img = _make_image(f"[AI-GEN] Mieszkanie {i+1}", color)
+    scam_specs = [
+        ("scam_mieszkanie_1", (100, 50, 130)),
+        ("scam_mieszkanie_2", (110, 60, 140)),
+        ("scam_mieszkanie_3", (120, 70, 150)),
+    ]
+    for fname, color in scam_specs:
+        img = _load_image_file(fname) or _make_image(f"[AI-GEN] {fname}", color)
         scam_imgs.append(_b64(img))
 
     listings.append({
@@ -496,7 +510,7 @@ def load_demo_state() -> dict | None:
     """Zwraca już zseedowany state, jeśli istnieje."""
     if _DEMO_FILE.exists():
         try:
-            return json.loads(_DEMO_FILE.read_text())
+            return json.loads(_DEMO_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return None
     return None
